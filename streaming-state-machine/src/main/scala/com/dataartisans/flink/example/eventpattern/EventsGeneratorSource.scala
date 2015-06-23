@@ -23,38 +23,39 @@ import org.apache.flink.streaming.api.functions.source.SourceFunction.SourceCont
  * A Flink data stream source that uses the [[EventsGenerator]] to produce a stream
  * of events.
  */
-class EventsGeneratorSource(val printSpeed: Boolean = false) extends RichParallelSourceFunction[Event] {
+class EventsGeneratorSource(val printSpeed: Boolean = false) extends RichParallelSourceFunction[(Event, Long)] {
   
   protected[this] var running = true
 
   protected[this] var count = 0
   
-  override def run(sourceContext: SourceContext[Event]): Unit = {
-    
-    if (printSpeed) {
-      val logger = new Thread("Throughput Logger") {
-        override def run(): Unit = {
-  
-          var lastCount = 0
-          var lastTimeStamp = System.currentTimeMillis()
-          
-          while (running) {
-            Thread.sleep(1000)
-            
-            val ts = System.currentTimeMillis()
-            val currCount = count
-            val factor: Double = (ts - lastTimeStamp) / 1000
-            val perSec = (currCount - lastCount) / factor
-            lastTimeStamp = ts
-            lastCount = currCount
-            
-            System.out.println(perSec + " / sec")
-          }
-        }
-      }
-      logger.setDaemon(true)
-      logger.start()
-    }
+  override def run(sourceContext: SourceContext[(Event, Long)]): Unit = {
+
+    // Throughput logging is done after the partitionBy
+//    if (printSpeed) {
+//      val logger = new Thread("Throughput Logger") {
+//        override def run(): Unit = {
+//
+//          var lastCount = 0
+//          var lastTimeStamp = System.currentTimeMillis()
+//
+//          while (running) {
+//            Thread.sleep(1000)
+//
+//            val ts = System.currentTimeMillis()
+//            val currCount = count
+//            val factor: Double = (ts - lastTimeStamp) / 1000
+//            val perSec = (currCount - lastCount) / factor
+//            lastTimeStamp = ts
+//            lastCount = currCount
+//
+//            System.out.println(perSec + " / sec")
+//          }
+//        }
+//      }
+//      logger.setDaemon(true)
+//      logger.start()
+//    }
     
     val generator = new EventsGenerator()
     
@@ -63,7 +64,7 @@ class EventsGeneratorSource(val printSpeed: Boolean = false) extends RichParalle
     val max = min + range
     
     while (running) {
-      sourceContext.collect(generator.next(min, max))
+      sourceContext.collect((generator.next(min, max), System.currentTimeMillis()))
       count += 1
     }
     

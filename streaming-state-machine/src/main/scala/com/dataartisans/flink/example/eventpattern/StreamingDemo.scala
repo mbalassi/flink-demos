@@ -20,9 +20,12 @@ import java.util.Properties
 
 import _root_.kafka.consumer.ConsumerConfig
 import com.dataartisans.flink.example.eventpattern.kafka.EventDeSerializer
+import com.dataartisans.flink.util.PerformanceCounter
 
-import org.apache.flink.api.common.functions.FlatMapFunction
+import org.apache.flink.api.common.functions.RichFlatMapFunction
+import org.apache.flink.configuration.Configuration
 import org.apache.flink.streaming.api.checkpoint.Checkpointed
+import org.apache.flink.streaming.api.functions.sink.SinkFunction
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.connectors.kafka.api.persistent.PersistentKafkaSource
 import org.apache.flink.util.Collector
@@ -37,13 +40,15 @@ import scala.collection.mutable
 object StreamingDemo {
 
   def main(args: Array[String]): Unit = {
-    
+
+    val checkpointInterval = args(0).toInt
+
     // create the environment to create streams and configure execution
     val env = StreamExecutionEnvironment.getExecutionEnvironment
-    env.setParallelism(4)
+//    env.setParallelism(4)
     
     // this statement enables the checkpointing mechanism with an interval of 1 sec
-    env.enableCheckpointing(1000)
+    env.enableCheckpointing(checkpointInterval)
     
     // create a data stream from the generator
     val stream = env.addSource(new EventsGeneratorSource(true))
@@ -64,10 +69,14 @@ object StreamingDemo {
       .partitionByHash("sourceAddress")
       
       // the function that evaluates the state machine over the sequence of events
-      .flatMap(new StateMachineMapper())
+      .flatMap(new StateMachineMapper(checkpointInterval))
       
       // output to standard-out
-      .print()
+      .addSink(new SinkFunction[(Alert, Long)] {
+      override def invoke(in: (Alert, Long)): Unit = {
+        //Unused for throughput, can be used for latency
+      }
+    })
     
     // trigger program execution
     env.execute()
@@ -79,18 +88,32 @@ object StreamingDemo {
  * events are consistent with the current state of the state machine. If the event is not
  * consistent with the current state, the function produces an alert.
  */
-class StateMachineMapper extends FlatMapFunction[Event, Alert] with Checkpointed[mutable.HashMap[Int, State]] {
+class StateMachineMapper(checkpointInterval : Int) extends RichFlatMapFunction[(Event, Long), (Alert, Long)] with Checkpointed[mutable.HashMap[Int, State]] {
   
   private[this] val states = new mutable.HashMap[Int, State]()
-  
-  override def flatMap(t: Event, out: Collector[Alert]): Unit = {
-    
+
+  @transient
+  var pCounter: PerformanceCounter = null
+
+  @throws(classOf[Exception])
+  override def open(parameters: Configuration) {
+    pCounter = new PerformanceCounter("pc", 1000, 1000, 30000,  "/home/mbalassi/flink-state-perf-" +
+      checkpointInterval + "-" + getRuntimeContext.getIndexOfThisSubtask + ".csv")
+  }
+
+  override def flatMap(tuple: (Event, Long), out: Collector[(Alert, Long)]): Unit = {
+
+    pCounter.count()
+
+    val t = tuple._1
+
     // get and remove the current state
     val state = states.remove(t.sourceAddress).getOrElse(InitialState)
-    
+
     val nextState = state.transition(t.event)
     if (nextState == InvalidTransition) {
-      out.collect(Alert(t.sourceAddress, state, t.event))
+      // Output is unused for cluster measurements
+      //out.collect(Alert(t.sourceAddress, state, t.event))
     } 
     else if (!nextState.terminal) {
       states.put(t.sourceAddress, nextState)
