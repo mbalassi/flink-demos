@@ -23,48 +23,31 @@ import org.apache.flink.streaming.api.functions.source.SourceFunction.SourceCont
  * A Flink data stream source that uses the [[EventsGenerator]] to produce a stream
  * of events.
  */
-class EventsGeneratorSource(val printSpeed: Boolean = false) extends RichParallelSourceFunction[(Event, Long)] {
+class EventsGeneratorSource(val addLatency: Boolean = false, val latencyCount: Int = 10000) extends RichParallelSourceFunction[(Event, Long)] {
   
   protected[this] var running = true
 
   protected[this] var count = 0
-  
+
   override def run(sourceContext: SourceContext[(Event, Long)]): Unit = {
 
-    // Throughput logging is done after the partitionBy
-//    if (printSpeed) {
-//      val logger = new Thread("Throughput Logger") {
-//        override def run(): Unit = {
-//
-//          var lastCount = 0
-//          var lastTimeStamp = System.currentTimeMillis()
-//
-//          while (running) {
-//            Thread.sleep(1000)
-//
-//            val ts = System.currentTimeMillis()
-//            val currCount = count
-//            val factor: Double = (ts - lastTimeStamp) / 1000
-//            val perSec = (currCount - lastCount) / factor
-//            lastTimeStamp = ts
-//            lastCount = currCount
-//
-//            System.out.println(perSec + " / sec")
-//          }
-//        }
-//      }
-//      logger.setDaemon(true)
-//      logger.start()
-//    }
-    
     val generator = new EventsGenerator()
     
     val range = Integer.MAX_VALUE / getRuntimeContext.getNumberOfParallelSubtasks()
     val min = range * getRuntimeContext.getIndexOfThisSubtask()
     val max = min + range
-    
+
+
     while (running) {
-      sourceContext.collect((generator.next(min, max), System.currentTimeMillis()))
+
+      // Add valid timestamp for on record in every latencyCount
+      var timeStamp = 0L
+      if(addLatency && latencyCount <= count) {
+        timeStamp = System.currentTimeMillis()
+        count = 0
+      }
+
+      sourceContext.collect((generator.next(min, max), timeStamp))
       count += 1
     }
     

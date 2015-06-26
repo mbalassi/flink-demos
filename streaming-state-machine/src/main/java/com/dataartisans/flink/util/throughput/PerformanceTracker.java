@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.dataartisans.flink.util;
+package com.dataartisans.flink.util.throughput;
 
 import java.io.BufferedWriter;
 import java.io.FileNotFoundException;
